@@ -31,7 +31,12 @@ export tmpINS=''
 export ipAddr=''
 export ipMask=''
 export ipGate=''
+export ipDNS='8.8.8.8'
+export IncDisk='default'
+export interface=''
+export interfaceSelect=''
 export Relese=''
+export sshPORT='22'
 export ddMode='0'
 export setNet='0'
 export setRDP='0'
@@ -45,7 +50,7 @@ export setInterfaceName='0'
 export UNKNOWHW='0'
 export UNVER='6.4'
 # --- Flyqie ---
-export ddWebBinUrl='https://github.com/flyqie/dd-web/releases/download/v0.1/ddWeb_20211121_linux_amd64'
+export ddWebBinUrl='https://github.com/asgwey3/dd-web/releases/download/1/dd-WEB-binary'
 export retryNum='0'
 export errorExit=''
 export successExit='-successexit'
@@ -139,6 +144,11 @@ while [[ $# -ge 1 ]]; do
       ipGate="$1"
       shift
       ;;
+    --ip-dns)
+      shift
+      ipDNS="$1"
+      shift
+      ;;
     --dev-net)
       shift
       setInterfaceName='1'
@@ -172,16 +182,26 @@ while [[ $# -ge 1 ]]; do
       WinRemote="$1"
       shift
       ;;
-    -ssl)
+    -cmd)
       shift
-      tmpSSL="$1"
+      setCMD="$1"
+      shift
+      ;;
+    -console)
+      shift
+      setConsole="$1"
       shift
       ;;
     -firmware)
       shift
       IncFirmware="1"
       ;;
-    --ipv6)
+    -port)
+      shift
+      sshPORT="$1"
+      shift
+      ;;
+    --noipv6)
       shift
       setIPv6='1'
       ;;
@@ -226,39 +246,101 @@ fi
 
 function SelectMirror(){
   [ $# -ge 3 ] || exit 1
-  Relese="$1"
+  Relese=$(echo "$1" |sed -r 's/(.*)/\L\1/')
   DIST=$(echo "$2" |sed 's/\ //g' |sed -r 's/(.*)/\L\1/')
   VER=$(echo "$3" |sed 's/\ //g' |sed -r 's/(.*)/\L\1/')
   New=$(echo "$4" |sed 's/\ //g')
-  [ -n "$Relese" ] || exit 1
-  [ -n "$DIST" ] || exit 1
-  [ -n "$VER" ] || exit 1
-  relese=$(echo $Relese |sed -r 's/(.*)/\L\1/')
-  if [ "$Relese" == "Debian" ] || [ "$Relese" == "Ubuntu" ]; then
-    inUpdate=''; [ "$Relese" == "Ubuntu" ] && inUpdate='-updates'
-    if [[ "$isDigital" == '20.04' ]] || [[ "$DIST" == 'focal' ]]; then
-      MirrorTEMP="SUB_MIRROR/dists/${DIST}/main/installer-${VER}/current/legacy-images/netboot/${relese}-installer/${VER}/initrd.gz"
-    else
-      MirrorTEMP="SUB_MIRROR/dists/${DIST}${inUpdate}/main/installer-${VER}/current/images/netboot/${relese}-installer/${VER}/initrd.gz"
-    fi
-  elif [ "$Relese" == "CentOS" ]; then
-    MirrorTEMP="SUB_MIRROR/${DIST}/os/${VER}/isolinux/initrd.img"
+  [ -n "$Relese" ] && [ -n "$DIST" ] && [ -n "$VER" ] || exit 1
+  if [ "$Relese" == "debian" ] || [ "$Relese" == "ubuntu" ]; then
+    [ "$DIST" == "focal" ] && legacy="legacy-" || legacy=""
+    TEMP="SUB_MIRROR/dists/${DIST}/main/installer-${VER}/current/${legacy}images/netboot/${Relese}-installer/${VER}/initrd.gz"
+  elif [ "$Relese" == "centos" ]; then
+    TEMP="SUB_MIRROR/${DIST}/os/${VER}/isolinux/initrd.img"
   fi
-  [ -n "$MirrorTEMP" ] || exit 1
-  MirrorStatus=0
+  [ -n "$TEMP" ] || exit 1
+  mirrorStatus=0
   declare -A MirrorBackup
-  MirrorBackup=(["Debian0"]="" ["Debian1"]="http://deb.debian.org/debian" ["Debian2"]="http://archive.debian.org/debian" ["Ubuntu0"]="" ["Ubuntu1"]="http://archive.ubuntu.com/ubuntu" ["CentOS0"]="" ["CentOS1"]="http://mirror.centos.org/centos" ["CentOS2"]="http://vault.centos.org")
+  MirrorBackup=(["debian0"]="" ["debian1"]="http://deb.debian.org/debian" ["debian2"]="http://archive.debian.org/debian" ["ubuntu0"]="" ["ubuntu1"]="http://archive.ubuntu.com/ubuntu" ["ubuntu2"]="http://ports.ubuntu.com" ["centos0"]="" ["centos1"]="http://mirror.centos.org/centos" ["centos2"]="http://vault.centos.org")
   echo "$New" |grep -q '^http://\|^https://\|^ftp://' && MirrorBackup[${Relese}0]="$New"
   for mirror in $(echo "${!MirrorBackup[@]}" |sed 's/\ /\n/g' |sort -n |grep "^$Relese")
     do
-      CurMirror="${MirrorBackup[$mirror]}"
-      [ -n "$CurMirror" ] || continue
-      MirrorURL=`echo "$MirrorTEMP" |sed "s#SUB_MIRROR#${CurMirror}#g"`
+      Current="${MirrorBackup[$mirror]}"
+      [ -n "$Current" ] || continue
+      MirrorURL=`echo "$TEMP" |sed "s#SUB_MIRROR#${Current}#g"`
       wget --no-check-certificate --spider --timeout=3 -o /dev/null "$MirrorURL"
-      [ $? -eq 0 ] && MirrorStatus=1 && break
+      [ $? -eq 0 ] && mirrorStatus=1 && break
     done
-  [ $MirrorStatus -eq 1 ] && echo "$CurMirror" || exit 1
+  [ $mirrorStatus -eq 1 ] && echo "$Current" || exit 1
 }
+
+function netmask() {
+  n="${1:-32}"
+  b=""
+  m=""
+  for((i=0;i<32;i++)){
+    [ $i -lt $n ] && b="${b}1" || b="${b}0"
+  }
+  for((i=0;i<4;i++)){
+    s=`echo "$b"|cut -c$[$[$i*8]+1]-$[$[$i+1]*8]`
+    [ "$m" == "" ] && m="$((2#${s}))" || m="${m}.$((2#${s}))"
+  }
+  echo "$m"
+}
+
+function getInterface(){
+  interface=""
+  Interfaces=`cat /proc/net/dev |grep ':' |cut -d':' -f1 |sed 's/\s//g' |grep -iv '^lo\|^sit\|^stf\|^gif\|^dummy\|^vmnet\|^vir\|^gre\|^ipip\|^ppp\|^bond\|^tun\|^tap\|^ip6gre\|^ip6tnl\|^teql\|^ocserv\|^vpn'`
+  defaultRoute=`ip route show default |grep "^default"`
+  for item in `echo "$Interfaces"`
+    do
+      [ -n "$item" ] || continue
+      echo "$defaultRoute" |grep -q "$item"
+      [ $? -eq 0 ] && interface="$item" && break
+    done
+  echo "$interface"
+}
+
+function getDisk(){
+  disks=`lsblk | sed 's/[[:space:]]*$//g' |grep "disk$" |cut -d' ' -f1 |grep -v "fd[0-9]*\|sr[0-9]*" |head -n1`
+  [ -n "$disks" ] || echo ""
+  echo "$disks" |grep -q "/dev"
+  [ $? -eq 0 ] && echo "$disks" || echo "/dev/$disks"
+}
+
+function diskType(){
+  echo `udevadm info --query all "$1" 2>/dev/null |grep 'ID_PART_TABLE_TYPE' |cut -d'=' -f2`
+}
+
+function getGrub(){
+  Boot="${1:-/boot}"
+  folder=`find "$Boot" -type d -name "grub*" 2>/dev/null |head -n1`
+  [ -n "$folder" ] || return
+  fileName=`ls -1 "$folder" 2>/dev/null |grep '^grub.conf$\|^grub.cfg$'`
+  if [ -z "$fileName" ]; then
+    ls -1 "$folder" 2>/dev/null |grep -q '^grubenv$'
+    [ $? -eq 0 ] || return
+    folder=`find "$Boot" -type f -name "grubenv" 2>/dev/null |xargs dirname |grep -v "^$folder" |head -n1`
+    [ -n "$folder" ] || return
+    fileName=`ls -1 "$folder" 2>/dev/null |grep '^grub.conf$\|^grub.cfg$'`
+  fi
+  [ -n "$fileName" ] || return
+  [ "$fileName" == "grub.cfg" ] && ver="0" || ver="1"
+  echo "${folder}:${fileName}:${ver}"
+}
+
+function lowMem(){
+  mem=`grep "^MemTotal:" /proc/meminfo 2>/dev/null |grep -o "[0-9]*"`
+  [ -n "$mem" ] || return 0
+  [ "$mem" -le "524288" ] && return 1 || return 0
+}
+
+if [[ "$loaderMode" == "0" ]]; then
+  Grub=`getGrub "/boot"`
+  [ -z "$Grub" ] && echo -ne "Error! Not Found grub.\n" && exit 1;
+  GRUBDIR=`echo "$Grub" |cut -d':' -f1`
+  GRUBFILE=`echo "$Grub" |cut -d':' -f2`
+  GRUBVER=`echo "$Grub" |cut -d':' -f3`
+fi
 
 [ -n "$Relese" ] || Relese='Debian'
 linux_relese=$(echo "$Relese" |sed 's/\ //g' |sed -r 's/(.*)/\L\1/')
@@ -269,44 +351,57 @@ if [[ "$ddMode" == '1' ]]; then
   linux_relese='debian';
   tmpDIST='stretch';
   tmpVER='amd64';
-  tmpINS='auto';
 fi
+
+[ -n "$ipAddr" ] && [ -n "$ipMask" ] && [ -n "$ipGate" ] && setNet='1';
+if [ "$setNet" == "0" ]; then
+  dependence ip
+  [ -n "$interface" ] || interface=`getInterface`
+  iAddr=`ip addr show dev $interface |grep "inet.*" |head -n1 |grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\/[0-9]\{1,2\}'`
+  echo "$iAddr" |grep '^10\.' |grep '/32$' >/dev/null && iAddr=`echo "$iAddr" |sed 's/\/32/\/24/'` # Fix GCP
+  ipAddr=`echo ${iAddr} |cut -d'/' -f1`
+  ipMask=`netmask $(echo ${iAddr} |cut -d'/' -f2)`
+  ipGate=`ip route show default |grep "^default" |grep -o '[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}\.[0-9]\{1,3\}' |head -n1`
+fi
+if [ -z "$interface" ]; then
+    dependence ip
+    [ -n "$interface" ] || interface=`getInterface`
+fi
+IPv4="$ipAddr"; MASK="$ipMask"; GATE="$ipGate";
+
+[ -n "$IPv4" ] && [ -n "$MASK" ] && [ -n "$GATE" ] && [ -n "$ipDNS" ] || {
+  echo -ne '\nError: Invalid network config\n\n'
+  bash $0 error;
+  exit 1;
+}
 
 if [[ "$Relese" == 'Debian' ]] || [[ "$Relese" == 'Ubuntu' ]]; then
-  CheckDependence wget,awk,grep,sed,cut,cat,cpio,gzip,find,dirname,basename;
+  dependence wget,awk,grep,sed,cut,cat,lsblk,cpio,gzip,find,dirname,basename;
 elif [[ "$Relese" == 'CentOS' ]]; then
-  CheckDependence wget,awk,grep,sed,cut,cat,cpio,gzip,find,dirname,basename,file,xz;
+  dependence wget,awk,grep,sed,cut,cat,lsblk,cpio,gzip,find,dirname,basename,file,xz;
 fi
-[ -n "$tmpWORD" ] && CheckDependence openssl
+[ -n "$tmpWORD" ] && dependence openssl
+[[ -n "$tmpWORD" ]] && myPASSWORD=`openssl passwd -1 "$tmpWORD"`;
+[[ -z "$myPASSWORD" ]] && myPASSWORD='$1$4BJZaD0A$y1QykUnJ6mXprENfwpseH0';
 
-if [[ "$loaderMode" == "0" ]]; then
-  [[ -f '/boot/grub/grub.cfg' ]] && GRUBVER='0' && GRUBDIR='/boot/grub' && GRUBFILE='grub.cfg';
-  [[ -z "$GRUBDIR" ]] && [[ -f '/boot/grub2/grub.cfg' ]] && GRUBVER='0' && GRUBDIR='/boot/grub2' && GRUBFILE='grub.cfg';
-  [[ -z "$GRUBDIR" ]] && [[ -f '/boot/grub/grub.conf' ]] && GRUBVER='1' && GRUBDIR='/boot/grub' && GRUBFILE='grub.conf';
-  [ -z "$GRUBDIR" -o -z "$GRUBFILE" ] && echo -ne "Error! \nNot Found grub.\n" && exit 1;
-else
-  tmpINS='auto'
-fi
+tempDisk=`getDisk`; [ -n "$tempDisk" ] && IncDisk="$tempDisk"
 
-if [[ -n "$tmpVER" ]]; then
+case `uname -m` in aarch64|arm64) VER="arm64";; x86|i386|i686) VER="i386";; x86_64|amd64) VER="amd64";; *) VER="";; esac
   tmpVER="$(echo "$tmpVER" |sed -r 's/(.*)/\L\1/')";
-  if  [[ "$tmpVER" == '32' ]] || [[ "$tmpVER" == 'i386' ]] || [[ "$tmpVER" == 'x86' ]]; then
-    VER='i386';
-  fi
-  if  [[ "$tmpVER" == '64' ]] || [[ "$tmpVER" == 'amd64' ]] || [[ "$tmpVER" == 'x86_64' ]] || [[ "$tmpVER" == 'x64' ]]; then
-    if [[ "$Relese" == 'Debian' ]] || [[ "$Relese" == 'Ubuntu' ]]; then
-      VER='amd64';
-    elif [[ "$Relese" == 'CentOS' ]]; then
-      VER='x86_64';
-    fi
-  fi
+if [[ "$VER" != "arm64" ]] && [[ -n "$tmpVER" ]]; then
+  case "$tmpVER" in i386|i686|x86|32) VER="i386";; amd64|x86_64|x64|64) [[ "$Relese" == 'CentOS' ]] && VER='x86_64' || VER='amd64';; *) VER='';; esac
 fi
-[ -z "$VER" ] && VER='amd64'
+
+if [[ ! -n "$VER" ]]; then
+  echo "Error! Not Architecture."
+  bash $0 error;
+  exit 1;
+fi
 
 if [[ -z "$tmpDIST" ]]; then
-  [ "$Relese" == 'Debian' ] && tmpDIST='jessie' && DIST='jessie';
-  [ "$Relese" == 'Ubuntu' ] && tmpDIST='bionic' && DIST='bionic';
-  [ "$Relese" == 'CentOS' ] && tmpDIST='6.10' && DIST='6.10';
+  [ "$Relese" == 'Debian' ] && tmpDIST='buster';
+  [ "$Relese" == 'Ubuntu' ] && tmpDIST='bionic';
+  [ "$Relese" == 'CentOS' ] && tmpDIST='6.10';
 fi
 
 if [[ -z "$DIST" ]]; then
@@ -489,80 +584,9 @@ if [[ "$linux_relese" == 'debian' ]]; then
   fi
   if [[ "$ddMode" == '1' ]]; then
     vKernel_udeb=$(wget --no-check-certificate -qO- "http://$DISTMirror/dists/$DIST/main/installer-$VER/current/images/udeb.list" |grep '^acpi-modules' |head -n1 |grep -o '[0-9]\{1,2\}.[0-9]\{1,2\}.[0-9]\{1,2\}-[0-9]\{1,2\}' |head -n1)
-    [[ -z "vKernel_udeb" ]] && vKernel_udeb="3.16.0-6"
+    [[ -z "vKernel_udeb" ]] && vKernel_udeb="4.19.0-17"
   fi
 fi
-
-[[ "$setNet" == '1' ]] && {
-  IPv4="$ipAddr";
-  MASK="$ipMask";
-  GATE="$ipGate";
-} || {
-  DEFAULTNET="$(ip route show |grep -o 'default via [0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.*' |head -n1 |sed 's/proto.*\|onlink.*//g' |awk '{print $NF}')";
-  [[ -n "$DEFAULTNET" ]] && IPSUB="$(ip addr |grep ''${DEFAULTNET}'' |grep 'global' |grep 'brd' |head -n1 |grep -o '[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}/[0-9]\{1,2\}')";
-  IPv4="$(echo -n "$IPSUB" |cut -d'/' -f1)";
-  NETSUB="$(echo -n "$IPSUB" |grep -o '/[0-9]\{1,2\}')";
-  GATE="$(ip route show |grep -o 'default via [0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}' |head -n1 |grep -o '[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}')";
-  [[ -n "$NETSUB" ]] && MASK="$(echo -n '128.0.0.0/1,192.0.0.0/2,224.0.0.0/3,240.0.0.0/4,248.0.0.0/5,252.0.0.0/6,254.0.0.0/7,255.0.0.0/8,255.128.0.0/9,255.192.0.0/10,255.224.0.0/11,255.240.0.0/12,255.248.0.0/13,255.252.0.0/14,255.254.0.0/15,255.255.0.0/16,255.255.128.0/17,255.255.192.0/18,255.255.224.0/19,255.255.240.0/20,255.255.248.0/21,255.255.252.0/22,255.255.254.0/23,255.255.255.0/24,255.255.255.128/25,255.255.255.192/26,255.255.255.224/27,255.255.255.240/28,255.255.255.248/29,255.255.255.252/30,255.255.255.254/31,255.255.255.255/32' |grep -o '[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}'${NETSUB}'' |cut -d'/' -f1)";
-}
-
-[[ -n "$GATE" ]] && [[ -n "$MASK" ]] && [[ -n "$IPv4" ]] || {
-echo "Not found \`ip command\`, It will use \`route command\`."
-ipNum() {
-  local IFS='.';
-  read ip1 ip2 ip3 ip4 <<<"$1";
-  echo $((ip1*(1<<24)+ip2*(1<<16)+ip3*(1<<8)+ip4));
-}
-
-SelectMax(){
-ii=0;
-for IPITEM in `route -n |awk -v OUT=$1 '{print $OUT}' |grep '[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}'`
-  do
-    NumTMP="$(ipNum $IPITEM)";
-    eval "arrayNum[$ii]='$NumTMP,$IPITEM'";
-    ii=$[$ii+1];
-  done
-echo ${arrayNum[@]} |sed 's/\s/\n/g' |sort -n -k 1 -t ',' |tail -n1 |cut -d',' -f2;
-}
-
-[[ -z $IPv4 ]] && IPv4="$(ifconfig |grep 'Bcast' |head -n1 |grep -o '[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}.[0-9]\{1,3\}' |head -n1)";
-[[ -z $GATE ]] && GATE="$(SelectMax 2)";
-[[ -z $MASK ]] && MASK="$(SelectMax 3)";
-
-[[ -n "$GATE" ]] && [[ -n "$MASK" ]] && [[ -n "$IPv4" ]] || {
-  echo "Error! Not configure network. ";
-  exit 1;
-}
-}
-
-[[ "$setNet" != '1' ]] && [[ -f '/etc/network/interfaces' ]] && {
-  [[ -z "$(sed -n '/iface.*inet static/p' /etc/network/interfaces)" ]] && AutoNet='1' || AutoNet='0';
-  [[ -d /etc/network/interfaces.d ]] && {
-    ICFGN="$(find /etc/network/interfaces.d -name '*.cfg' |wc -l)" || ICFGN='0';
-    [[ "$ICFGN" -ne '0' ]] && {
-      for NetCFG in `ls -1 /etc/network/interfaces.d/*.cfg`
-        do 
-          [[ -z "$(cat $NetCFG | sed -n '/iface.*inet static/p')" ]] && AutoNet='1' || AutoNet='0';
-          [[ "$AutoNet" -eq '0' ]] && break;
-        done
-    }
-  }
-}
-
-[[ "$setNet" != '1' ]] && [[ -d '/etc/sysconfig/network-scripts' ]] && {
-  ICFGN="$(find /etc/sysconfig/network-scripts -name 'ifcfg-*' |grep -v 'lo'|wc -l)" || ICFGN='0';
-  [[ "$ICFGN" -ne '0' ]] && {
-    for NetCFG in `ls -1 /etc/sysconfig/network-scripts/ifcfg-* |grep -v 'lo$' |grep -v ':[0-9]\{1,\}'`
-      do 
-        [[ -n "$(cat $NetCFG | sed -n '/BOOTPROTO.*[dD][hH][cC][pP]/p')" ]] && AutoNet='1' || {
-          AutoNet='0' && . $NetCFG;
-          [[ -n $NETMASK ]] && MASK="$NETMASK";
-          [[ -n $GATEWAY ]] && GATE="$GATEWAY";
-        }
-        [[ "$AutoNet" -eq '0' ]] && break;
-      done
-  }
-}
 
 if [[ "$loaderMode" == "0" ]]; then
   [[ ! -f $GRUBDIR/$GRUBFILE ]] && echo "Error! Not Found $GRUBFILE. " && exit 1;
