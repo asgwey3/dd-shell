@@ -1,5 +1,5 @@
 ```
-bash <(wget --no-check-certificate -qO- 'https://raw.githubusercontent.com/asgwey3/dd-shell/master/Core_Install.sh') --dd-web-bin-url "https://example.com/demo_ddWeb_20211121_linux_amd64" -dd "https://example.com/dd_pkg.gz"
+bash <(wget --no-check-certificate -qO- 'https://raw.githubusercontent.com/asgwey3/dd-shell/master/Core_Install.sh') --dd-web-bin-url "https://github.com/asgwey3/dd-web/releases/download/1/dd-WEB-binary" -dd "https://example.com/dd_pkg.gz"
 ```
 [https://hostloc.com/thread-921407-1-1.html](https://hostloc.com/thread-921407-1-1.html)
 
